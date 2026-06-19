@@ -1,0 +1,39 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+
+# Test + coverage outputs
+*.test
+*.out
+cover.out
+cover.html
+coverage.out
+coverage.html
+coverage.xml
+coverage.txt
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go workspace local files
+go.work.sum
+
+# Build artifacts
+dist/
+build/
+
+# AI session context (local only)
+CLAUDE.md
+TECHNICAL.md
+.claude/settings.local.json

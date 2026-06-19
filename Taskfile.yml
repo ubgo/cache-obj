@@ -1,0 +1,73 @@
+version: '3'
+
+# Reusable command runner for the ubgo/cache-obj repo.
+# Run `task --list` to see all available tasks.
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run all tests with the race detector
+    cmds:
+      - go test -race -count=2 ./...
+
+  cover:
+    desc: Coverage of the product package (root); prints the total
+    cmds:
+      - go test -coverprofile=cover.out -covermode=atomic .
+      - go tool cover -func=cover.out | tail -1
+
+  cover:all:
+    desc: Coverage across all packages (objtest's failure-assertion branches are uncoverable by design)
+    cmds:
+      - go test -coverpkg=./... -coverprofile=cover.out -covermode=atomic ./...
+      - go tool cover -func=cover.out | tail -1
+
+  test:coverage:
+    desc: HTML coverage report for the product package
+    cmds:
+      - go test -race -coverprofile=cover.out .
+      - go tool cover -html=cover.out -o cover.html
+      - echo "Coverage report written to cover.html"
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format all Go files
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail if any file is not gofmt-clean
+    cmds:
+      - test -z "$(gofmt -l .)"
+
+  tidy:
+    desc: Tidy go.mod
+    cmds:
+      - go mod tidy
+
+  check:
+    desc: Full local gate (fmt + vet + lint + race tests + 100% product coverage)
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: lint
+      - task: test:race
+      - task: cover
