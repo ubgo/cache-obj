@@ -132,21 +132,29 @@ func Run(t *testing.T, bounded bool, f Factory) {
 
 	if bounded {
 		t.Run("LRUEvictionFires", func(t *testing.T) {
-			var evicted []string
-			c := f(cacheobj.WithOnEvict(func(k string, cause cache.EvictionCause) {
+			type ev struct {
+				key string
+				val *Val
+			}
+			var evicted []ev
+			c := f(cacheobj.WithOnEvict(func(k string, v *Val, cause cache.EvictionCause) {
 				if cause == cache.EvictSize {
-					evicted = append(evicted, k)
+					evicted = append(evicted, ev{k, v})
 				}
 			}))
 			// Capacity is 2 by suite convention (see boundedFactory in tests).
-			c.Set("a", &Val{N: 1})
+			a := &Val{N: 1}
+			c.Set("a", a)
 			c.Set("b", &Val{N: 2})
 			c.Set("c", &Val{N: 3}) // evicts "a" (LRU)
 			if _, ok := c.Get("a"); ok {
 				t.Fatal("a should have been LRU-evicted")
 			}
-			if len(evicted) != 1 || evicted[0] != "a" {
+			if len(evicted) != 1 || evicted[0].key != "a" {
 				t.Fatalf("OnEvict size evictions = %v, want [a]", evicted)
+			}
+			if evicted[0].val != a {
+				t.Fatal("OnEvict did not deliver the evicted value by reference")
 			}
 			st := c.Stats()
 			if st.Evictions != 1 || st.EvictionsByCause[cache.EvictSize] != 1 {

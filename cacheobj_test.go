@@ -76,20 +76,25 @@ func TestExpiryFiresOnEvict(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clk := newClock()
 			var got []cache.EvictionCause
+			var gotVal int
 			c := cacheobj.New[int](
 				cacheobj.WithCapacity(tc.cap),
 				cacheobj.WithClock(clk.now),
-				cacheobj.WithOnEvict(func(_ string, cause cache.EvictionCause) {
+				cacheobj.WithOnEvict(func(_ string, v int, cause cache.EvictionCause) {
 					got = append(got, cause)
+					gotVal = v
 				}),
 			)
-			c.SetTTL("k", 1, time.Second)
+			c.SetTTL("k", 42, time.Second)
 			clk.advance(2 * time.Second)
 			if _, ok := c.Get("k"); ok {
 				t.Fatal("entry should have expired")
 			}
 			if len(got) != 1 || got[0] != cache.EvictExpired {
 				t.Fatalf("OnEvict causes = %v, want [expired]", got)
+			}
+			if gotVal != 42 {
+				t.Fatalf("OnEvict delivered value %d, want 42", gotVal)
 			}
 			if st := c.Stats(); st.EvictionsByCause[cache.EvictExpired] != 1 {
 				t.Fatalf("expired eviction not counted: %+v", st)

@@ -33,7 +33,9 @@ type config struct {
 	capacity int
 	ttl      time.Duration
 	now      func() time.Time
-	onEvict  func(key string, cause cache.EvictionCause)
+	// onEvict carries the evicted value boxed as any; WithOnEvict's wrapper
+	// asserts it back to the caller's T. nil when no hook is registered.
+	onEvict func(key string, value any, cause cache.EvictionCause)
 }
 
 // WithCapacity bounds the cache to at most n entries using LRU eviction. A
@@ -47,11 +49,21 @@ func WithDefaultTTL(d time.Duration) Option { return func(c *config) { c.ttl = d
 
 // WithOnEvict registers a callback invoked when an entry is dropped
 // involuntarily: by capacity (cause cache.EvictSize) or TTL expiry (cause
-// cache.EvictExpired). It is NOT called for Del or Purge. The callback runs
-// while the cache lock is held — keep it fast and do not call back into the
-// cache from it.
-func WithOnEvict(fn func(key string, cause cache.EvictionCause)) Option {
-	return func(c *config) { c.onEvict = fn }
+// cache.EvictExpired). It receives the evicted key AND value, so the callback
+// can release resources the value owns (for example, close a *sql.DB). It is
+// NOT called for Del or Purge — those are deliberate, so clean up at the call
+// site. The callback runs while the cache lock is held: keep it fast and do
+// not call back into the cache from it.
+//
+// T is inferred from the callback's value parameter and must match the cache's
+// value type; a mismatch yields the zero value.
+func WithOnEvict[T any](fn func(key string, v T, cause cache.EvictionCause)) Option {
+	return func(c *config) {
+		c.onEvict = func(key string, value any, cause cache.EvictionCause) {
+			v, _ := value.(T)
+			fn(key, v, cause)
+		}
+	}
 }
 
 // WithClock overrides the time source, for deterministic TTL tests. Defaults
@@ -115,7 +127,7 @@ func (s *Store[T]) Get(key string) (T, bool) {
 		return zero, false
 	}
 	if s.expired(e) {
-		s.evictExpired(key)
+		s.evictExpired(key, e.value)
 		s.misses++
 		var zero T
 		return zero, false
@@ -235,25 +247,25 @@ func (s *Store[T]) remove(key string) {
 	delete(s.m, key)
 }
 
-func (s *Store[T]) evictExpired(key string) {
+func (s *Store[T]) evictExpired(key string, value T) {
 	s.remove(key)
 	s.evictions++
 	s.byCause[cache.EvictExpired]++
 	if s.cfg.onEvict != nil {
-		s.cfg.onEvict(key, cache.EvictExpired)
+		s.cfg.onEvict(key, value, cache.EvictExpired)
 	}
 }
 
 // onLRUEvict is golang-lru's eviction callback. It only counts/reports
 // genuine capacity evictions; deliberate removals set s.suppress first.
-func (s *Store[T]) onLRUEvict(key string, _ entry[T]) {
+func (s *Store[T]) onLRUEvict(key string, e entry[T]) {
 	if s.suppress {
 		return
 	}
 	s.evictions++
 	s.byCause[cache.EvictSize]++
 	if s.cfg.onEvict != nil {
-		s.cfg.onEvict(key, cache.EvictSize)
+		s.cfg.onEvict(key, e.value, cache.EvictSize)
 	}
 }
 

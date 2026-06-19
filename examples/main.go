@@ -18,6 +18,7 @@ func main() {
 	liveRegexCache()
 	httpClientPool()
 	ttlAndStats()
+	resourceCleanup()
 }
 
 // liveRegexCache memoizes compiled regular expressions — a value that cannot
@@ -71,8 +72,8 @@ func ttlAndStats() {
 	c := cacheobj.New[string](
 		cacheobj.WithCapacity(2),
 		cacheobj.WithClock(clock),
-		cacheobj.WithOnEvict(func(key string, cause cache.EvictionCause) {
-			fmt.Printf("evicted %q (%s)\n", key, cause)
+		cacheobj.WithOnEvict(func(key, value string, cause cache.EvictionCause) {
+			fmt.Printf("evicted %q=%q (%s)\n", key, value, cause)
 		}),
 	)
 
@@ -87,4 +88,26 @@ func ttlAndStats() {
 	st := c.Stats()
 	fmt.Printf("stats: hits=%d misses=%d sets=%d evictions=%d hitRatio=%.2f\n",
 		st.Hits, st.Misses, st.Sets, st.Evictions, st.HitRatio())
+}
+
+// conn is a stand-in for a resource-owning value (e.g. *sql.DB) that must be
+// closed when it leaves the cache.
+type conn struct{ name string }
+
+func (c *conn) Close() { fmt.Printf("closed conn %q\n", c.name) }
+
+// resourceCleanup shows the value-bearing OnEvict closing handles owned by
+// evicted values — the reason to cache live, resource-owning objects.
+func resourceCleanup() {
+	fmt.Println("\n== resource cleanup on eviction ==")
+	pool := cacheobj.New[*conn](
+		cacheobj.WithCapacity(1),
+		cacheobj.WithOnEvict(func(_ string, v *conn, _ cache.EvictionCause) {
+			v.Close() // release the evicted value's resource
+		}),
+	)
+	pool.Set("primary", &conn{name: "primary"})
+	pool.Set("replica", &conn{name: "replica"}) // evicts "primary" → closed
+	pool.Purge()                                // explicit: does NOT fire OnEvict
+	fmt.Println("done (Purge did not close replica — explicit removal)")
 }

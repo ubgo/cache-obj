@@ -80,14 +80,14 @@ func New[T any](opts ...Option) *Store[T]
 c := cacheobj.New[*http.Client](
     cacheobj.WithCapacity(1000),                 // LRU bound; omit for unbounded
     cacheobj.WithDefaultTTL(10*time.Minute),     // TTL applied by Set; SetTTL overrides
-    cacheobj.WithOnEvict(func(key string, cause cache.EvictionCause) {
-        // cause is cache.EvictSize (capacity) or cache.EvictExpired (TTL)
+    cacheobj.WithOnEvict(func(key string, v *http.Client, cause cache.EvictionCause) {
+        // cause is cache.EvictSize (capacity) or cache.EvictExpired (TTL); v is the evicted value
     }),
     cacheobj.WithClock(myFakeClock),             // deterministic TTL tests
 )
 ```
 
-`OnEvict` fires for **capacity** (`cache.EvictSize`) and **expiry** (`cache.EvictExpired`) only — the involuntary drops where you might need to release a live handle. Explicit `Del` / `Purge` do not fire it (you initiated those, so clean up at the call site). The callback runs while the cache lock is held — keep it fast and do not call back into the cache from it.
+`OnEvict` fires for **capacity** (`cache.EvictSize`) and **expiry** (`cache.EvictExpired`) only — the involuntary drops where you may need to release the evicted value's resources. It receives the key and value (the value's type is inferred and must match the cache's `T`). Explicit `Del` / `Purge` do not fire it (you initiated those, so clean up at the call site). The callback runs while the cache lock is held — keep it fast and do not call back into the cache from it.
 
 ## Gotchas
 
@@ -178,21 +178,24 @@ go func() {
 }()
 ```
 
-### Reacting to evictions (metrics / signals)
+### Releasing handles on eviction
 
-`OnEvict` fires when an entry is dropped involuntarily — by capacity (`cache.EvictSize`) or TTL expiry (`cache.EvictExpired`). It receives the **key and cause**, which is enough for metrics, logging, or signaling another system that a key is gone.
+`OnEvict` fires when an entry is dropped involuntarily — by capacity (`cache.EvictSize`) or TTL expiry (`cache.EvictExpired`) — and receives the evicted **key and value**, so it can release whatever the value owns (close a `*sql.DB`, drain a pool, etc.). It is **not** called for `Del` / `Purge` (those are deliberate — clean up at the call site).
 
 ```go
-c := cacheobj.New[string](
-    cacheobj.WithCapacity(500),
-    cacheobj.WithOnEvict(func(key string, cause cache.EvictionCause) {
-        metrics.Inc("cache.evict", "cause", string(cause)) // log / count / notify
+pool := cacheobj.New[*sql.DB](
+    cacheobj.WithCapacity(32),
+    cacheobj.WithDefaultTTL(time.Hour),
+    cacheobj.WithOnEvict(func(key string, db *sql.DB, cause cache.EvictionCause) {
+        _ = db.Close() // the evicted value, closed as it leaves the cache
     }),
 )
 ```
 
+The value's type is inferred from the callback — no type parameter needed — and must match the cache's `T`.
+
 > [!NOTE]
-> `OnEvict` does **not** receive the evicted **value**, so it cannot, by itself, `Close()` a handle that the value owns. The callback runs while the cache lock is held — keep it fast and never call back into the cache from inside it. If you need to release resources owned by evicted values (e.g. `*sql.DB`, `*http.Client`), see the open item in [`CHANGELOG`](CHANGELOG.md) — a value-bearing eviction hook is under consideration.
+> `OnEvict` runs while the cache lock is held: keep it fast and never call back into the cache from inside it. For slow cleanup, hand the value to a background closer rather than blocking the callback.
 
 ### Unbounded vs bounded
 

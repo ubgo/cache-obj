@@ -45,17 +45,17 @@ func ExampleStore_SetTTL() {
 	// Output: secret true
 }
 
-// WithOnEvict releases a live handle when the cache involuntarily drops it
-// (capacity or expiry). Here capacity is 1, so the second Set evicts the
-// first and the callback closes it.
+// WithOnEvict observes involuntary drops (capacity or expiry) and receives
+// the evicted key AND value — so it can release whatever the value owns. Here
+// capacity is 1, so the second Set evicts the first.
 func ExampleWithOnEvict() {
 	c := cacheobj.New[string](
 		cacheobj.WithCapacity(1),
-		cacheobj.WithOnEvict(func(key string, cause cache.EvictionCause) {
-			fmt.Printf("evicted %q (%s)\n", key, cause)
+		cacheobj.WithOnEvict(func(key, value string, cause cache.EvictionCause) {
+			fmt.Printf("evicted %q=%q (%s)\n", key, value, cause)
 		}),
 	)
 	c.Set("a", "first")
 	c.Set("b", "second") // evicts "a" by capacity
-	// Output: evicted "a" (size)
+	// Output: evicted "a"="first" (size)
 }

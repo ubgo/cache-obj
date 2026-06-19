@@ -7,7 +7,8 @@ All notable changes to `github.com/ubgo/cache-obj` are documented here. The form
 ### Added
 
 - Initial release. `Cache[T]` contract — an in-process, zero-serialization, live-object-by-reference cache: `Get` / `Set` / `SetTTL` / `Del` / `Len` / `Purge` / `Stats`.
-- `New[T]` with options: `WithCapacity` (LRU bound; non-positive = unbounded), `WithDefaultTTL`, `WithOnEvict` (fires on capacity + expiry evictions only), `WithClock` (deterministic tests).
+- `New[T]` with options: `WithCapacity` (LRU bound; non-positive = unbounded), `WithDefaultTTL`, `WithOnEvict`, `WithClock` (deterministic tests).
+- `WithOnEvict` is **value-bearing**: the callback `func(key string, v T, cause cache.EvictionCause)` receives the evicted value (type inferred, no type parameter needed), so it can release resources the value owns (e.g. close a `*sql.DB`). Fires only on capacity (`cache.EvictSize`) and expiry (`cache.EvictExpired`) — never on `Del` / `Purge`.
 - Lazy per-entry TTL expiry; `ttl <= 0` means no expiry.
 - `Stats` reported via the shared `github.com/ubgo/cache.Stats` shape, including `EvictionsByCause`.
 - `objtest.Run` conformance suite — the executable contract; the reference `New[T]` implementation passes it.
@@ -24,5 +25,4 @@ All notable changes to `github.com/ubgo/cache-obj` are documented here. The form
 
 ### Open / under consideration
 
-- **Value-bearing eviction hook.** `WithOnEvict` is currently key-only (`func(key string, cause cache.EvictionCause)`), which cannot release resources owned by an evicted value (e.g. close a `*sql.DB`). A value-bearing variant — or making `OnEvict` carry the value — is under consideration for callers that cache resource-owning objects.
 - **Single-flight `Remember`.** A get-or-load helper that dedupes concurrent misses on a hot key (the byte cache has `Remember`; the live-object cache does not yet).
