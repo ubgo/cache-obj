@@ -16,7 +16,8 @@ All notable changes to `github.com/ubgo/cache-obj` are documented here. The form
 
 ### Documentation
 
-- README "Recipes" section: package-level singleton, cache-aside loader helper, caching a live ORM entity for edge traversal, periodic stats logging, reacting to evictions, and bounded-vs-unbounded.
+- README "Use cases" section enumerating concrete live-object scenarios (compiled regex, templates, HTTP/gRPC/DB handles, per-key rate limiters, validators, live ORM entities, loaded models).
+- README "Recipes" section: package-level singleton, cache-aside loader helper, caching a live ORM entity for edge traversal, periodic stats logging, releasing handles on eviction, per-key rate limiter, compiled template cache, and bounded-vs-unbounded.
 
 ### Notes
 

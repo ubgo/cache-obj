@@ -29,6 +29,21 @@ if r, ok := re.Get(`\d+`); ok {
 
 The dividing question: **after `Get`, do you need the *original object*, or just its *data*?** Original object (liveness) → `cache-obj`. Just the data → `ubgo/cache`.
 
+## Use cases
+
+Concrete things people cache with `cache-obj` — each is a value that is expensive to build *and* cannot (or should not) be serialized:
+
+- **Compiled regular expressions** (`*regexp.Regexp`) — compile once, reuse the program.
+- **Parsed templates** (`*template.Template`, `*pongo2.Template`) — parse once, render many times.
+- **HTTP clients per host/tenant** (`*http.Client`) — keep connection pools and configured transports alive.
+- **gRPC / DB connections** (`*grpc.ClientConn`, `*sql.DB`, `*sql.Stmt`) — pool live handles keyed by target; close them on eviction via `OnEvict`.
+- **Per-key rate limiters** (`*rate.Limiter`) — one live limiter per user/IP/route, carrying its token-bucket state.
+- **Compiled validators / schemas** (JSON-schema, CEL programs, query plans) — build the evaluator once.
+- **Live ORM entities for traversal** (an ent `*ent.User`) — keep the client binding so `.QueryEdges()` / `.Update()` work; a decoded copy would null it.
+- **Loaded models / parsers / interpreters** — anything with a heavy constructor and internal state that must stay resident.
+
+If the value is a plain DTO, config struct, scalar, or anything you only read *fields* off, you do **not** need `cache-obj` — use `ubgo/cache` + `cache-mem`.
+
 ## Install
 
 ```sh
@@ -196,6 +211,37 @@ The value's type is inferred from the callback — no type parameter needed — 
 
 > [!NOTE]
 > `OnEvict` runs while the cache lock is held: keep it fast and never call back into the cache from inside it. For slow cleanup, hand the value to a background closer rather than blocking the callback.
+
+### Per-key rate limiter
+
+One live `*rate.Limiter` per user/IP, each carrying its own token-bucket state — the limiter must be the *same instance* across requests, so a serializing cache would reset every caller's budget.
+
+```go
+limiters := cacheobj.New[*rate.Limiter](cacheobj.WithCapacity(100_000))
+
+func allow(userID string) bool {
+    lim, _ := getOrLoad(limiters, userID, func() (*rate.Limiter, error) {
+        return rate.NewLimiter(rate.Every(time.Second), 10), nil // 10 rps, burst 10
+    })
+    return lim.Allow()
+}
+```
+
+### Compiled template cache
+
+```go
+tpls := cacheobj.New[*template.Template](cacheobj.WithCapacity(256))
+
+func render(w io.Writer, name, src string, data any) error {
+    t, err := getOrLoad(tpls, name, func() (*template.Template, error) {
+        return template.New(name).Parse(src) // parse once
+    })
+    if err != nil {
+        return err
+    }
+    return t.Execute(w, data)
+}
+```
 
 ### Unbounded vs bounded
 
