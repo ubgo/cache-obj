@@ -1,5 +1,6 @@
 // Command examples is a runnable tour of cache-obj: caching live objects
-// (compiled regexes, an *http.Client), per-entry TTL, and the OnEvict hook.
+// (compiled regexes, an *http.Client), single-flight Remember, per-entry TTL +
+// Stats, and resource cleanup via the value-bearing OnEvict hook.
 //
 //	go run ./examples
 package main
@@ -8,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ubgo/cache"
@@ -17,6 +20,7 @@ import (
 func main() {
 	liveRegexCache()
 	httpClientPool()
+	rememberSingleFlight()
 	ttlAndStats()
 	resourceCleanup()
 }
@@ -60,6 +64,29 @@ func httpClientPool() {
 	x := clientFor("api.example.com")
 	y := clientFor("api.example.com")
 	fmt.Printf("reused client: %v\n\n", x == y)
+}
+
+// rememberSingleFlight shows Remember collapsing a thundering herd: 50
+// goroutines miss the same cold key at once, but the loader runs only once.
+func rememberSingleFlight() {
+	fmt.Println("\n== Remember single-flight ==")
+	c := cacheobj.New[int]()
+
+	var loads int32
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = c.Remember("hot", time.Minute, func() (int, error) {
+				atomic.AddInt32(&loads, 1)
+				time.Sleep(10 * time.Millisecond) // simulate a slow DB/RPC load
+				return 42, nil
+			})
+		}()
+	}
+	wg.Wait()
+	fmt.Printf("50 concurrent misses → loader ran %d time(s)\n", atomic.LoadInt32(&loads))
 }
 
 // ttlAndStats shows per-entry TTL with a controllable clock, the OnEvict hook,
