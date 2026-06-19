@@ -31,8 +31,9 @@
 //
 // # Expiry
 //
-// Expiry is lazy: an entry past its TTL is detected and evicted on the Get
-// that touches it; there is no background sweeper in this version. An LRU
-// capacity bound (see WithCapacity) reclaims memory for keys that are never
-// read again.
+// Expiry is lazy by default: an entry past its TTL is detected and evicted on
+// the Get that touches it. An LRU capacity bound (see WithCapacity) reclaims
+// memory for keys that are never read again; alternatively WithSweepInterval
+// starts a background goroutine that periodically evicts expired entries (call
+// Close to stop it).
 package cacheobj

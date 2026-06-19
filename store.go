@@ -30,9 +30,10 @@ import (
 type Option func(*config)
 
 type config struct {
-	capacity int
-	ttl      time.Duration
-	now      func() time.Time
+	capacity      int
+	ttl           time.Duration
+	sweepInterval time.Duration
+	now           func() time.Time
 	// onEvict carries the evicted value boxed as any; WithOnEvict's wrapper
 	// asserts it back to the caller's T. nil when no hook is registered.
 	onEvict func(key string, value any, cause cache.EvictionCause)
@@ -70,6 +71,13 @@ func WithOnEvict[T any](fn func(key string, v T, cause cache.EvictionCause)) Opt
 // to time.Now.
 func WithClock(now func() time.Time) Option { return func(c *config) { c.now = now } }
 
+// WithSweepInterval starts a background goroutine that, every d, evicts
+// entries whose TTL has elapsed (firing OnEvict with cache.EvictExpired) —
+// reclaiming memory for expired keys that are never read again. A
+// non-positive d (the default) means no sweeper: expiry stays lazy
+// (checked on Get). When you use a sweeper, call Close to stop the goroutine.
+func WithSweepInterval(d time.Duration) Option { return func(c *config) { c.sweepInterval = d } }
+
 // Store is the in-memory Cache[T] implementation returned by New.
 type Store[T any] struct {
 	mu  sync.Mutex
@@ -84,6 +92,11 @@ type Store[T any] struct {
 
 	// flight dedupes concurrent Remember loads per key (single-flight).
 	flight loaderFlight[T]
+
+	// done stops the background sweeper goroutine (nil when no sweeper runs).
+	// closeOnce makes Close idempotent.
+	done      chan struct{}
+	closeOnce sync.Once
 
 	hits, misses, sets, deletes, evictions int64
 	byCause                                map[cache.EvictionCause]int64
@@ -114,6 +127,10 @@ func New[T any](opts ...Option) *Store[T] {
 		s.lru = l
 	} else {
 		s.m = make(map[string]entry[T])
+	}
+	if cfg.sweepInterval > 0 {
+		s.done = make(chan struct{})
+		go s.sweepLoop(cfg.sweepInterval)
 	}
 	return s
 }

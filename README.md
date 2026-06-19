@@ -81,6 +81,7 @@ func New[T any](opts ...Option) *Store[T]
 
 // On the concrete *Store[T] (not the interface):
 func (s *Store[T]) Remember(key string, ttl time.Duration, fn func() (T, error)) (T, error)
+func (s *Store[T]) Close() // stops the background sweeper; idempotent
 ```
 
 | Method | Purpose |
@@ -104,6 +105,7 @@ c := cacheobj.New[*http.Client](
         // cause is cache.EvictSize (capacity) or cache.EvictExpired (TTL); v is the evicted value
     }),
     cacheobj.WithClock(myFakeClock),             // deterministic TTL tests
+    cacheobj.WithSweepInterval(time.Minute),     // background expiry sweeper (else lazy); call Close to stop
 )
 ```
 
@@ -114,7 +116,7 @@ c := cacheobj.New[*http.Client](
 > [!WARNING]
 > **Returned objects are shared, not copied.** `Get` hands back the *same* reference every caller holds. That is the whole point (and impossible to avoid for non-copyable types), but it means a caller mutating a returned pointer mutates what everyone else sees. Treat cached objects as immutable, or synchronize mutation yourself.
 
-- **Lazy expiry, no sweeper.** An expired entry is reclaimed on the next `Get` for its key, or when LRU capacity evicts it — there is no background janitor in this version. If you cache many short-TTL keys that are never read again, bound the cache with `WithCapacity` so they cannot accumulate.
+- **Lazy expiry by default.** An expired entry is reclaimed on the next `Get` for its key, or when LRU capacity evicts it. If you cache many short-TTL keys that are never read again, either bound the cache with `WithCapacity` or enable the background sweeper with `WithSweepInterval` (and call `Close` to stop it) so they cannot accumulate.
 - **In-process only.** Liveness cannot cross a process boundary; there is no network backend and never will be. That is `ubgo/cache`'s job.
 
 ## Recipes
@@ -239,6 +241,23 @@ func render(w io.Writer, name, src string, data any) error {
     return t.Execute(w, data)
 }
 ```
+
+### Background expiry sweeper
+
+By default expiry is lazy. For a cache of short-TTL keys that may never be read again, a sweeper proactively reclaims them. It runs a goroutine — call `Close` when done.
+
+```go
+sessions := cacheobj.New[*Session](
+    cacheobj.WithDefaultTTL(30*time.Minute),
+    cacheobj.WithSweepInterval(time.Minute), // evict expired entries every minute
+    cacheobj.WithOnEvict(func(id string, s *Session, _ cache.EvictionCause) {
+        s.flush() // sweeper fires OnEvict(EvictExpired) for each reclaimed entry
+    }),
+)
+defer sessions.Close() // stops the sweeper goroutine; idempotent
+```
+
+`Close` is a method on `*Store[T]` (not the interface), idempotent, and a no-op if you never set `WithSweepInterval`.
 
 ### Unbounded vs bounded
 

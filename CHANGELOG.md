@@ -10,6 +10,7 @@ All notable changes to `github.com/ubgo/cache-obj` are documented here. The form
 - `New[T]` with options: `WithCapacity` (LRU bound; non-positive = unbounded), `WithDefaultTTL`, `WithOnEvict`, `WithClock` (deterministic tests).
 - `WithOnEvict` is **value-bearing**: the callback `func(key string, v T, cause cache.EvictionCause)` receives the evicted value (type inferred, no type parameter needed), so it can release resources the value owns (e.g. close a `*sql.DB`). Fires only on capacity (`cache.EvictSize`) and expiry (`cache.EvictExpired`) — never on `Del` / `Purge`.
 - `(*Store[T]).Remember(key, ttl, fn)` — single-flight get-or-load: under concurrent misses for the same key the loader runs exactly once and all callers share the result. Loader errors are returned and not cached. Method on the concrete `*Store[T]` (the `Cache[T]` interface stays minimal).
+- `WithSweepInterval(d)` + `(*Store[T]).Close()` — optional background sweeper that evicts expired entries every `d` (firing `OnEvict` with `cache.EvictExpired`), for caches of short-TTL keys that may never be read again. Default remains lazy expiry (no goroutine). `Close` stops the goroutine, is idempotent, and is a no-op when no sweeper was started.
 - Lazy per-entry TTL expiry; `ttl <= 0` means no expiry.
 - `Stats` reported via the shared `github.com/ubgo/cache.Stats` shape, including `EvictionsByCause`.
 - `objtest.Run` conformance suite — the executable contract; the reference `New[T]` implementation passes it.
