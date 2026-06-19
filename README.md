@@ -97,6 +97,114 @@ c := cacheobj.New[*http.Client](
 - **Lazy expiry, no sweeper.** An expired entry is reclaimed on the next `Get` for its key, or when LRU capacity evicts it — there is no background janitor in this version. If you cache many short-TTL keys that are never read again, bound the cache with `WithCapacity` so they cannot accumulate.
 - **In-process only.** Liveness cannot cross a process boundary; there is no network backend and never will be. That is `ubgo/cache`'s job.
 
+## Recipes
+
+### Package-level singleton
+
+The common shape: one process-wide cache, initialized once.
+
+```go
+package regexcache
+
+import (
+    "regexp"
+
+    cacheobj "github.com/ubgo/cache-obj"
+)
+
+var cache = cacheobj.New[*regexp.Regexp](cacheobj.WithCapacity(1024))
+
+// Get returns a compiled regex, compiling and caching on first use.
+func Get(pattern string) (*regexp.Regexp, error) {
+    if r, ok := cache.Get(pattern); ok {
+        return r, nil
+    }
+    r, err := regexp.Compile(pattern)
+    if err != nil {
+        return nil, err
+    }
+    cache.Set(pattern, r)
+    return r, nil
+}
+```
+
+### Cache-aside with a loader
+
+A small helper captures the get-or-load pattern. (A built-in single-flight `Remember` is planned; until then this is the idiom — note it does **not** dedupe concurrent misses, so for a hot key several loads may race on a cold start.)
+
+```go
+func getOrLoad[T any](c cacheobj.Cache[T], key string, load func() (T, error)) (T, error) {
+    if v, ok := c.Get(key); ok {
+        return v, nil
+    }
+    v, err := load()
+    if err != nil {
+        var zero T
+        return zero, err
+    }
+    c.Set(key, v)
+    return v, nil
+}
+```
+
+### Caching a live ORM entity you will traverse
+
+The case `ubgo/cache` cannot serve: you need the *live* entity (its client binding intact) so downstream code can traverse edges or mutate it. A codec round-trip would null the binding.
+
+```go
+users := cacheobj.New[*ent.User](
+    cacheobj.WithCapacity(10_000),
+    cacheobj.WithDefaultTTL(15*time.Minute),
+)
+
+u, err := getOrLoad(users, id, func() (*ent.User, error) {
+    return client.User.Get(ctx, id) // live entity, ent client still attached
+})
+// u.QueryPosts().All(ctx) works — it would panic on a decoded copy
+```
+
+> Reminder: the cached `*ent.User` is shared. If you mutate it in place, every holder sees the change. Cache a flat DTO instead if you only need its fields.
+
+### Periodic stats logging
+
+```go
+go func() {
+    for range time.Tick(time.Minute) {
+        s := cache.Stats()
+        log.Printf("cache: entries=%d hits=%d misses=%d hitRatio=%.2f evictions=%d (size=%d expired=%d)",
+            s.Entries, s.Hits, s.Misses, s.HitRatio(), s.Evictions,
+            s.EvictionsByCause[cache.EvictSize], s.EvictionsByCause[cache.EvictExpired])
+    }
+}()
+```
+
+### Reacting to evictions (metrics / signals)
+
+`OnEvict` fires when an entry is dropped involuntarily — by capacity (`cache.EvictSize`) or TTL expiry (`cache.EvictExpired`). It receives the **key and cause**, which is enough for metrics, logging, or signaling another system that a key is gone.
+
+```go
+c := cacheobj.New[string](
+    cacheobj.WithCapacity(500),
+    cacheobj.WithOnEvict(func(key string, cause cache.EvictionCause) {
+        metrics.Inc("cache.evict", "cause", string(cause)) // log / count / notify
+    }),
+)
+```
+
+> [!NOTE]
+> `OnEvict` does **not** receive the evicted **value**, so it cannot, by itself, `Close()` a handle that the value owns. The callback runs while the cache lock is held — keep it fast and never call back into the cache from inside it. If you need to release resources owned by evicted values (e.g. `*sql.DB`, `*http.Client`), see the open item in [`CHANGELOG`](CHANGELOG.md) — a value-bearing eviction hook is under consideration.
+
+### Unbounded vs bounded
+
+```go
+// Bounded: at most N entries, LRU eviction when full.
+bounded := cacheobj.New[string](cacheobj.WithCapacity(500))
+
+// Unbounded: grows until entries are deleted or expire. Pair with a TTL
+// so it cannot grow without limit.
+unbounded := cacheobj.New[string](cacheobj.WithDefaultTTL(5 * time.Minute))
+```
+
 ## Relationship to the cache family
 
 `cache-obj` is a sibling of `ubgo/cache`, not a backend of it. It imports the core only for the `Stats` and `EvictionCause` types so metrics look consistent. It is the family-branded successor to the deprecated `github.com/ubgo/threadsafecache`.
