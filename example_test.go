@@ -33,6 +33,20 @@ func Example() {
 	// true
 }
 
+// Remember is get-or-load with single-flight: the loader runs once on a miss
+// (and once across concurrent misses for the same key), and the result is
+// cached. A second call is served from cache without re-running the loader.
+func ExampleStore_Remember() {
+	c := cacheobj.New[int]()
+	calls := 0
+	load := func() (int, error) { calls++; return 42, nil }
+
+	v1, _ := c.Remember("answer", time.Minute, load)
+	v2, _ := c.Remember("answer", time.Minute, load) // cached — loader skipped
+	fmt.Println(v1, v2, calls)
+	// Output: 42 42 1
+}
+
 // SetTTL stores a value with an explicit lifetime; a non-positive TTL means
 // the entry never expires.
 func ExampleStore_SetTTL() {

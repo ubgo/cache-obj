@@ -82,6 +82,9 @@ type Store[T any] struct {
 	// suppress silences onLRUEvict during deliberate removals (see file doc).
 	suppress bool
 
+	// flight dedupes concurrent Remember loads per key (single-flight).
+	flight loaderFlight[T]
+
 	hits, misses, sets, deletes, evictions int64
 	byCause                                map[cache.EvictionCause]int64
 }

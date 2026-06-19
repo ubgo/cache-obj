@@ -60,6 +60,7 @@ Requires Go 1.24+. One third-party dependency (`hashicorp/golang-lru/v2`) plus `
 - **LRU bound.** `WithCapacity(n)` evicts the least-recently-used entry when full. Omit it (or pass a non-positive `n`) for an unbounded cache.
 - **Eviction hook.** `WithOnEvict` fires when an entry is dropped *involuntarily* (capacity or expiry) — the place to close handles or release resources.
 - **Stats.** `Stats()` returns the shared `cache.Stats` shape (hits/misses/sets/deletes/evictions + `EvictionsByCause` + entry gauge), so observability reads identically across the family.
+- **Single-flight `Remember`.** Get-or-load that collapses a thundering herd: N concurrent misses for the same key run the loader once and share the result.
 - **Thread-safe.** All operations are safe for concurrent use, verified under `-race`.
 - **A conformance suite.** `objtest.Run` *is* the contract; the built-in implementation passes it, and so must any alternative.
 
@@ -77,6 +78,9 @@ type Cache[T any] interface {
 }
 
 func New[T any](opts ...Option) *Store[T]
+
+// On the concrete *Store[T] (not the interface):
+func (s *Store[T]) Remember(key string, ttl time.Duration, fn func() (T, error)) (T, error)
 ```
 
 | Method | Purpose |
@@ -88,6 +92,7 @@ func New[T any](opts ...Option) *Store[T]
 | `Len()` | Current entry count (including expired-but-not-yet-swept). |
 | `Purge()` | Drop every entry. Does **not** fire `OnEvict`. |
 | `Stats()` | Point-in-time `cache.Stats` snapshot. |
+| `Remember(key, ttl, fn)` | Get-or-load with single-flight: loads via `fn` once under concurrent misses, stores with `ttl`. Errors are returned, not cached. (`*Store[T]` method, not on the interface.) |
 
 ## Options
 
@@ -143,36 +148,28 @@ func Get(pattern string) (*regexp.Regexp, error) {
 }
 ```
 
-### Cache-aside with a loader
+### Single-flight loading with `Remember`
 
-A small helper captures the get-or-load pattern. (A built-in single-flight `Remember` is planned; until then this is the idiom — note it does **not** dedupe concurrent misses, so for a hot key several loads may race on a cold start.)
+`Remember` is get-or-load with **single-flight**: when many goroutines miss the same cold key at once, the loader runs **exactly once** and the others wait and share the result — no thundering herd on your DB/RPC. Loader errors are returned to all callers and not cached (the next call retries).
 
 ```go
-func getOrLoad[T any](c cacheobj.Cache[T], key string, load func() (T, error)) (T, error) {
-    if v, ok := c.Get(key); ok {
-        return v, nil
-    }
-    v, err := load()
-    if err != nil {
-        var zero T
-        return zero, err
-    }
-    c.Set(key, v)
-    return v, nil
-}
+users := cacheobj.New[*ent.User](cacheobj.WithCapacity(10_000))
+
+u, err := users.Remember(id, 15*time.Minute, func() (*ent.User, error) {
+    return client.User.Get(ctx, id) // runs once even under N concurrent misses
+})
 ```
+
+`Remember` is a method on the concrete `*Store[T]` returned by `New` (not on the `Cache[T]` interface, which stays minimal). The loader must not call `Remember` for the same key (it would deadlock waiting on itself).
 
 ### Caching a live ORM entity you will traverse
 
 The case `ubgo/cache` cannot serve: you need the *live* entity (its client binding intact) so downstream code can traverse edges or mutate it. A codec round-trip would null the binding.
 
 ```go
-users := cacheobj.New[*ent.User](
-    cacheobj.WithCapacity(10_000),
-    cacheobj.WithDefaultTTL(15*time.Minute),
-)
+users := cacheobj.New[*ent.User](cacheobj.WithCapacity(10_000))
 
-u, err := getOrLoad(users, id, func() (*ent.User, error) {
+u, err := users.Remember(id, 15*time.Minute, func() (*ent.User, error) {
     return client.User.Get(ctx, id) // live entity, ent client still attached
 })
 // u.QueryPosts().All(ctx) works — it would panic on a decoded copy
@@ -220,7 +217,7 @@ One live `*rate.Limiter` per user/IP, each carrying its own token-bucket state �
 limiters := cacheobj.New[*rate.Limiter](cacheobj.WithCapacity(100_000))
 
 func allow(userID string) bool {
-    lim, _ := getOrLoad(limiters, userID, func() (*rate.Limiter, error) {
+    lim, _ := limiters.Remember(userID, 0, func() (*rate.Limiter, error) {
         return rate.NewLimiter(rate.Every(time.Second), 10), nil // 10 rps, burst 10
     })
     return lim.Allow()
@@ -233,8 +230,8 @@ func allow(userID string) bool {
 tpls := cacheobj.New[*template.Template](cacheobj.WithCapacity(256))
 
 func render(w io.Writer, name, src string, data any) error {
-    t, err := getOrLoad(tpls, name, func() (*template.Template, error) {
-        return template.New(name).Parse(src) // parse once
+    t, err := tpls.Remember(name, 0, func() (*template.Template, error) {
+        return template.New(name).Parse(src) // parsed once, even under concurrency
     })
     if err != nil {
         return err
