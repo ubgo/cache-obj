@@ -2,10 +2,11 @@
 
 All notable changes to `github.com/ubgo/cache-obj` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-06-19
 
 ### Added
 
+- Licensed under Apache-2.0.
 - Initial release. `Cache[T]` contract — an in-process, zero-serialization, live-object-by-reference cache: `Get` / `Set` / `SetTTL` / `Del` / `Len` / `Purge` / `Stats`.
 - `New[T]` with options: `WithCapacity` (LRU bound; non-positive = unbounded), `WithDefaultTTL`, `WithOnEvict`, `WithClock` (deterministic tests).
 - `WithOnEvict` is **value-bearing**: the callback `func(key string, v T, cause cache.EvictionCause)` receives the evicted value (type inferred, no type parameter needed), so it can release resources the value owns (e.g. close a `*sql.DB`). Fires only on capacity (`cache.EvictSize`) and expiry (`cache.EvictExpired`) — never on `Del` / `Purge`.

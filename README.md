@@ -1,7 +1,7 @@
 # cache-obj
 
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/ubgo/cache-obj.svg)](https://pkg.go.dev/github.com/ubgo/cache-obj) [![Go Report Card](https://goreportcard.com/badge/github.com/ubgo/cache-obj)](https://goreportcard.com/report/github.com/ubgo/cache-obj) [![test](https://github.com/ubgo/cache-obj/actions/workflows/test.yml/badge.svg)](https://github.com/ubgo/cache-obj/actions/workflows/test.yml) [![lint](https://github.com/ubgo/cache-obj/actions/workflows/lint.yml/badge.svg)](https://github.com/ubgo/cache-obj/actions/workflows/lint.yml) ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen) [![tag](https://img.shields.io/github/v/tag/ubgo/cache-obj?sort=semver)](https://github.com/ubgo/cache-obj/tags) [![license](https://img.shields.io/badge/license-source--available-blue)](./LICENSE) ![Go](https://img.shields.io/badge/go-1.24-00ADD8?logo=go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ubgo/cache-obj.svg)](https://pkg.go.dev/github.com/ubgo/cache-obj) [![Go Report Card](https://goreportcard.com/badge/github.com/ubgo/cache-obj)](https://goreportcard.com/report/github.com/ubgo/cache-obj) [![test](https://github.com/ubgo/cache-obj/actions/workflows/test.yml/badge.svg)](https://github.com/ubgo/cache-obj/actions/workflows/test.yml) [![lint](https://github.com/ubgo/cache-obj/actions/workflows/lint.yml/badge.svg)](https://github.com/ubgo/cache-obj/actions/workflows/lint.yml) ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen) [![tag](https://img.shields.io/github/v/tag/ubgo/cache-obj?sort=semver)](https://github.com/ubgo/cache-obj/tags) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE) ![Go](https://img.shields.io/badge/go-1.24-00ADD8?logo=go)
 
 
 **An in-process, zero-serialization cache for Go that holds live objects by reference.** What you `Set` is the *exact* instance you `Get` back — no codec, no copy, no `interface{}` boxing. Generic over the value type, thread-safe, with per-entry TTL, LRU bounds, a value-bearing eviction hook, single-flight `Remember`, and an optional background expiry sweeper.
@@ -468,4 +468,4 @@ unbounded := cacheobj.New[string](cacheobj.WithDefaultTTL(5 * time.Minute))
 
 ## License
 
-Source-available under the [PolyForm Perimeter License 1.0.0](https://polyformproject.org/licenses/perimeter/1.0.0) — free for personal and commercial use, but not to build a competing product. See [`LICENSE`](LICENSE).
+Apache-2.0 — see [`LICENSE`](LICENSE).
